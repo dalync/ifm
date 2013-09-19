@@ -1,0 +1,6 @@
+name = Invalid File Manager
+description = Allows management of files that get added to the database but not properly uploaded to the site.
+package = Boss Creative
+core = 7.x
+configure = admin/config/media/ifm
+version = "7.x-1.0"

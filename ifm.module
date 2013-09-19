@@ -1,0 +1,119 @@
+<?php
+
+/**
+ * implements hook_menu().
+ */
+function ifm_menu(){
+  $items['admin/config/media/ifm'] = array(
+    'title' => t('Invalid File Manager'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('ifm_admin_form'),
+    'access arguments' => array('administer ifm'),
+    'description' => t('Manage invalid files that are in the database.'),
+  );
+  
+  return $items;
+}
+
+/**
+ * implements hook_permission().
+ */
+function ifm_permission() {
+  return array(
+    'administer ifm' => array(
+      'title' => t('Administer ifm'), 
+      'description' => t('Perform administration tasks for ifm.'),
+    ),
+  );
+}
+
+function ifm_admin_form($form,&$form_state) {
+  $invalid_files = ifm_get_invalid_files();
+
+  $rows = array();
+
+  $header = array(
+    'FID','File Name','File URI','File Mime','Count','Date Created',
+  );
+
+  $form_state['invalid_files'] = $invalid_files;
+
+  foreach ($invalid_files as $file) {
+    $row = array(
+      $file->fid,
+      $file->filename,
+      $file->uri,
+      $file->filemime,
+      $file->count,
+      date('m-d-Y',$file->timestamp),
+    );
+
+    $rows[] = $row;
+  }
+
+  $form['note'] = array(
+    '#markup' => "<p><strong>NOTE:</strong> The files listed below are in the database but do not exist on the server and should be removed.</p>",
+  );
+
+  $form['invalid_files'] = array(
+    '#type' => 'containter',
+    '#theme' => 'table',
+    '#header' => $header,
+    '#rows' => $rows,
+    '#empty' => 'No invalid Files Found',
+  );
+
+  $form['actions'] = array(
+    '#type' => 'actions',
+    'submit' => array(
+      '#type' => 'submit',
+      '#value' => t('Delete Invalid Files'),
+    ),
+  );
+
+  return $form;
+}
+
+function ifm_admin_form_submit($form,&$form_state) {
+  $invalid_files = $form_state['invalid_files'];
+  ifm_delete_files($invalid_files);
+  drupal_set_message("Invalid files deleted from the database successfully");
+}
+
+function ifm_get_file_fields() {
+  $results = db_select('field_config','f')->fields('f',array('field_name'))->condition('f.module',array('image','file'),'IN')->execute()->fetchCol();
+  return $results;
+}
+
+function ifm_get_invalid_files() {
+  $invalid_files = array();
+  $query = db_select('file_managed', 'f');//->fields('f')->execute()->fetchAll();
+
+  $query->leftJoin('file_usage','u','f.fid = u.fid');
+  $files = $query->fields('f')->fields('u',array('count'))->execute()->fetchAll();
+
+  foreach ($files as $file) {
+    if (!file_exists(drupal_realpath($file->uri))) {
+      $invalid_files[$file->fid] = file_load($file->fid);
+      $invalid_files[$file->fid]->count = $file->count;
+    }
+  }
+
+  return $invalid_files;
+}
+
+function ifm_delete_files($files = array()) {
+  $fields = ifm_get_file_fields();
+
+  $fids = array_keys($files);
+  foreach ($fields as $field_name) {
+    db_delete("field_data_{$field_name}")->condition("{$field_name}_fid",$fids,'IN')->execute();
+    db_delete("field_revision_{$field_name}")->condition("{$field_name}_fid",$fids,'IN')->execute();
+  }
+  db_delete('file_usage')->condition('fid',$fids,'IN')->execute();
+  foreach ($files as $file) {
+    file_delete($file,TRUE);
+  }
+
+  drupal_flush_all_caches();
+}
